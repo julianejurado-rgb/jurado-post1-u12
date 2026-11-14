@@ -1,0 +1,76 @@
+# .github/workflows/ci.yml
+name: CI - Build, Test & Docker Image
+
+# Se ejecuta en cada push y en cada pull request hacia main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# El workflow solo necesita leer el código del repositorio
+permissions:
+  contents: read
+
+jobs:
+  # ── Job 1: Compilar y ejecutar pruebas ──────────────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17 con caché Maven
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+
+      # verify ejecuta las pruebas y la verificación de cobertura
+      - name: Compilar y ejecutar pruebas
+        run: mvn clean verify
+
+      - name: Publicar reporte de pruebas como artefacto
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
+
+  # ── Job 2: Construir la imagen y verificar el monitoreo ──────────
+  docker-build:
+    runs-on: ubuntu-latest
+    # Solo se ejecuta si las pruebas del job anterior pasaron
+    needs: build-and-test
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Construir la imagen Docker
+        run: docker build -t mi-spring-app:${{ github.sha }} .
+
+      # Smoke test: levanta la imagen recién construida y consulta el
+      # endpoint de monitoreo hasta 15 veces, con 2 segundos entre intentos
+      - name: Levantar el contenedor y esperar /actuator/health
+        run: |
+          docker run -d --name smoke-test -p 8080:8080 mi-spring-app:${{ github.sha }}
+
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8080/actuator/health | grep -q '"status":"UP"'; then
+              echo "La aplicacion respondio UP"
+              exit 0
+            fi
+            echo "Esperando a que la aplicacion arranque... (${i}/15)"
+            sleep 2
+          done
+
+          echo "La aplicacion no respondio UP a tiempo"
+          docker logs smoke-test
+          exit 1
+
+      # Se ejecuta siempre, incluso si el smoke test falla
+      - name: Detener el contenedor de prueba
+        if: always()
+        run: docker rm -f smoke-test || true
