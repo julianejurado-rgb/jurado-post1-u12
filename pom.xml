@@ -35,6 +35,11 @@
 			<artifactId>h2</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+		<!-- Monitoreo: expone /actuator/health -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
 		<!-- Driver de PostgreSQL para el perfil prod -->
 		<dependency>
 			<groupId>org.postgresql</groupId>
